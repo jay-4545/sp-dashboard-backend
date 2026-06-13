@@ -1,0 +1,11 @@
+import { Router } from 'express';
+import { authenticate, requireAdmin } from '../middleware/auth.middleware';
+import * as controller from '../controllers/dashboard.controller';
+
+const router = Router();
+
+router.use(authenticate);
+router.get('/', controller.listAccounts);
+router.patch('/:id', requireAdmin, controller.updateAccount);
+
+export default router;
