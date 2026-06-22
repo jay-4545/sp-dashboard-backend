@@ -38,11 +38,16 @@ export function requireAdmin(req: AuthRequest, res: Response, next: NextFunction
   next();
 }
 
-export function signToken(user: User): string {
+export function signAccessToken(user: User): string {
   const payload: AuthPayload = {
     userId: user.id,
     email: user.email,
     role: user.role,
   };
-  return jwt.sign(payload, env.JWT_SECRET, { expiresIn: '15m' });
+  return jwt.sign(payload, env.JWT_SECRET, { expiresIn: env.JWT_ACCESS_EXPIRES_IN });
+}
+
+/** @deprecated Use signAccessToken */
+export function signToken(user: User): string {
+  return signAccessToken(user);
 }

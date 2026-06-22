@@ -1,6 +1,6 @@
 import { Model, DataTypes, Optional, Sequelize } from 'sequelize';
 
-export type SellerRegion = 'NA' | 'EU' | 'FE';
+export type SellerRegion = 'NA' | 'EU' | 'FE' | 'IN';
 
 export interface SellerAccountAttributes {
   id: string;
@@ -52,8 +52,8 @@ export function initSellerAccountModel(sequelize: Sequelize): typeof SellerAccou
       seller_id: { type: DataTypes.STRING(50), allowNull: false, unique: true },
       marketplace_id: { type: DataTypes.STRING(50), allowNull: false },
       region: {
-        type: DataTypes.ENUM('NA', 'EU', 'FE'),
-        allowNull: false,
+        type: DataTypes.ENUM('NA', 'EU', 'FE', 'IN'),
+        allowNull: false, 
         defaultValue: 'NA',
       },
       refresh_token: { type: DataTypes.TEXT, allowNull: true },

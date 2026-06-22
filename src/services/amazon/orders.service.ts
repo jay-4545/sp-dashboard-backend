@@ -1,9 +1,8 @@
-import axios from 'axios';
 import { amazonConfig } from '../../config/amazon';
 import { SellerAccount } from '../../models';
-import { getAccessTokenForAccount } from './auth.service';
 import { withRateLimit } from '../../utils/amazonRateLimit';
 import { withRetry } from '../../utils/retry';
+import { spApiRequest } from './spApiClient';
 
 interface AmazonOrder {
   AmazonOrderId: string;
@@ -25,8 +24,6 @@ export async function fetchOrders(
   account: SellerAccount,
   lastUpdatedAfter?: Date
 ): Promise<AmazonOrder[]> {
-  const accessToken = await getAccessTokenForAccount(account.id);
-  const endpoint = amazonConfig.getEndpoint(account.region);
   const allOrders: AmazonOrder[] = [];
   let nextToken: string | undefined;
 
@@ -42,18 +39,15 @@ export async function fetchOrders(
       params.NextToken = nextToken;
     }
 
-    const response = await withRateLimit(account.id, () =>
+    const data = await withRateLimit(account.id, () =>
       withRetry(() =>
-        axios.get<GetOrdersResponse>(`${endpoint}/orders/v0/orders`, {
-          params,
-          headers: { 'x-amz-access-token': accessToken },
-        })
+        spApiRequest<GetOrdersResponse>(account, 'GET', '/orders/v0/orders', { params })
       )
     );
 
-    const orders = response.data.payload?.Orders || [];
+    const orders = data.payload?.Orders || [];
     allOrders.push(...orders);
-    nextToken = response.data.payload?.NextToken;
+    nextToken = data.payload?.NextToken;
   } while (nextToken);
 
   return allOrders;
@@ -69,20 +63,23 @@ interface OrderItem {
   PromotionDiscount?: { Amount: string };
 }
 
+interface GetOrderItemsResponse {
+  payload?: { OrderItems?: OrderItem[] };
+}
+
 export async function fetchOrderItems(
   account: SellerAccount,
   amazonOrderId: string
 ): Promise<OrderItem[]> {
-  const accessToken = await getAccessTokenForAccount(account.id);
-  const endpoint = amazonConfig.getEndpoint(account.region);
-
-  const response = await withRateLimit(account.id, () =>
+  const data = await withRateLimit(account.id, () =>
     withRetry(() =>
-      axios.get(`${endpoint}/orders/v0/orders/${amazonOrderId}/orderItems`, {
-        headers: { 'x-amz-access-token': accessToken },
-      })
+      spApiRequest<GetOrderItemsResponse>(
+        account,
+        'GET',
+        `/orders/v0/orders/${amazonOrderId}/orderItems`
+      )
     )
   );
 
-  return response.data.payload?.OrderItems || [];
+  return data.payload?.OrderItems || [];
 }

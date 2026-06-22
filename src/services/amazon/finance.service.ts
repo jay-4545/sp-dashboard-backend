@@ -1,9 +1,7 @@
-import axios from 'axios';
-import { amazonConfig } from '../../config/amazon';
 import { SellerAccount } from '../../models';
-import { getAccessTokenForAccount } from './auth.service';
 import { withRateLimit } from '../../utils/amazonRateLimit';
 import { withRetry } from '../../utils/retry';
+import { spApiRequest } from './spApiClient';
 
 interface FinancialEventRecord {
   AmazonOrderId?: string;
@@ -11,12 +9,17 @@ interface FinancialEventRecord {
   [key: string]: unknown;
 }
 
+interface FinancialEventsResponse {
+  payload?: {
+    FinancialEvents?: Record<string, unknown[]>;
+    NextToken?: string;
+  };
+}
+
 export async function fetchFinancialEvents(
   account: SellerAccount,
   postedAfter?: Date
 ): Promise<FinancialEventRecord[]> {
-  const accessToken = await getAccessTokenForAccount(account.id);
-  const endpoint = amazonConfig.getEndpoint(account.region);
   const allEvents: FinancialEventRecord[] = [];
   let nextToken: string | undefined;
 
@@ -25,24 +28,23 @@ export async function fetchFinancialEvents(
     if (postedAfter) params.PostedAfter = postedAfter.toISOString();
     if (nextToken) params.NextToken = nextToken;
 
-    const response = await withRateLimit(account.id, () =>
+    const data = await withRateLimit(account.id, () =>
       withRetry(() =>
-        axios.get(`${endpoint}/finances/v0/financialEvents`, {
+        spApiRequest<FinancialEventsResponse>(account, 'GET', '/finances/v0/financialEvents', {
           params,
-          headers: { 'x-amz-access-token': accessToken },
         })
       )
     );
 
-    const events = response.data.payload?.FinancialEvents || {};
+    const events = data.payload?.FinancialEvents || {};
     for (const [eventType, eventList] of Object.entries(events)) {
       if (Array.isArray(eventList)) {
         for (const event of eventList) {
-          allEvents.push({ ...event, eventType });
+          allEvents.push({ ...(event as Record<string, unknown>), eventType });
         }
       }
     }
-    nextToken = response.data.payload?.NextToken;
+    nextToken = data.payload?.NextToken;
   } while (nextToken);
 
   return allEvents;

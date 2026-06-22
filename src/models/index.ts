@@ -8,6 +8,7 @@ import { initInventorySnapshotModel, InventorySnapshot } from './InventorySnapsh
 import { initFinancialEventModel, FinancialEvent } from './FinancialEvent';
 import { initProductModel, Product } from './Product';
 import { initSyncJobModel, SyncJob } from './SyncJob';
+import { initRefreshTokenModel, RefreshToken } from './RefreshToken';
 
 export function initModels(db: Sequelize = sequelize) {
   initUserModel(db);
@@ -18,6 +19,10 @@ export function initModels(db: Sequelize = sequelize) {
   initFinancialEventModel(db);
   initProductModel(db);
   initSyncJobModel(db);
+  initRefreshTokenModel(db);
+
+  User.hasMany(RefreshToken, { foreignKey: 'user_id', as: 'refreshTokens' });
+  RefreshToken.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
 
   SellerAccount.hasMany(Order, { foreignKey: 'account_id', as: 'orders' });
   Order.belongsTo(SellerAccount, { foreignKey: 'account_id', as: 'account' });
@@ -49,6 +54,7 @@ export function initModels(db: Sequelize = sequelize) {
     FinancialEvent,
     Product,
     SyncJob,
+    RefreshToken,
   };
 }
 
@@ -64,5 +70,6 @@ export {
   FinancialEvent,
   Product,
   SyncJob,
+  RefreshToken,
 };
 export type { SyncType, SyncJobStatus } from './SyncJob';

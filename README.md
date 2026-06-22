@@ -19,6 +19,7 @@ Express + TypeScript API for the Amazon Seller dashboard. Pulls data from Amazon
 
 - Node.js 18+
 - Neon PostgreSQL account (pooled connection string)
+- Amazon SP-API Private App registered in Seller Central
 
 ### Install & run
 
@@ -47,12 +48,27 @@ Copy from `.env.example`:
 | `DATABASE_URL` | Neon pooled connection string |
 | `JWT_SECRET` | Random secret, min 32 characters |
 | `ENCRYPTION_KEY` | Exactly 32 characters (refresh token encryption) |
-| `AMAZON_CLIENT_ID` | SP-API client ID (optional until sync) |
-| `AMAZON_CLIENT_SECRET` | SP-API client secret |
+| `AMAZON_CLIENT_ID` | SP-API LWA client ID |
+| `AMAZON_CLIENT_SECRET` | SP-API LWA client secret |
 | `AMAZON_REGION` | AWS region, e.g. `us-east-1` |
+| `AMAZON_REDIRECT_URI` | OAuth callback (default: `{BACKEND_URL}/api/amazon/callback`) |
+| `BACKEND_URL` | Public backend URL |
+| `AWS_ROLE_ARN` | IAM role ARN for SP-API AssumeRole |
+| `AWS_ACCESS_KEY_ID` | IAM user key for STS AssumeRole |
+| `AWS_SECRET_ACCESS_KEY` | IAM user secret |
 | `FRONTEND_URL` | Vercel URL for CORS |
 | `PORT` | Default `3001` |
 | `NODE_ENV` | `development` or `production` |
+
+## Amazon SP-API Setup
+
+1. Register a **Private App** in Seller Central → Develop Apps
+2. Add OAuth redirect URI: `http://localhost:3001/api/amazon/callback` (dev) or your Render URL in prod
+3. Copy LWA Client ID and Secret to `.env`
+4. Configure IAM user + role with SP-API permissions; set `AWS_*` env vars
+5. In the dashboard UI: **Add Account** → **Connect Amazon** (OAuth per seller account)
+
+Sync workers start automatically once credentials are configured.
 
 ## API Endpoints
 
@@ -61,23 +77,20 @@ Copy from `.env.example`:
 | POST | `/api/auth/login` | Login |
 | GET | `/api/auth/me` | Current user |
 | GET | `/api/accounts` | Seller accounts |
+| POST | `/api/accounts` | Create account slot (admin) |
 | PATCH | `/api/accounts/:id` | Update account (admin) |
+| DELETE | `/api/accounts/:id` | Delete account (admin) |
+| GET | `/api/amazon/auth-url` | Get OAuth URL (admin) |
+| GET | `/api/amazon/callback` | OAuth callback (public) |
+| DELETE | `/api/amazon/disconnect/:accountId` | Disconnect account (admin) |
 | GET | `/api/dashboard/summary` | Dashboard KPIs |
 | GET | `/api/orders` | Orders (paginated) |
 | GET | `/api/inventory` | Inventory snapshots |
+| GET | `/api/products` | Product listings |
 | GET | `/api/finance/events` | Financial events |
 | GET | `/api/finance/pnl` | P&L summary |
 | GET | `/api/sync/status` | Sync job status |
 | POST | `/api/sync/trigger` | Manual sync (admin) |
-
-## Amazon SP-API (when ready)
-
-1. Register a Private App in Seller Central → Develop Apps
-2. Self-authorize each seller account and collect refresh tokens
-3. Add `AMAZON_CLIENT_ID` and `AMAZON_CLIENT_SECRET` to `.env`
-4. Store encrypted refresh tokens per seller account in the database
-
-Sync workers start automatically once credentials are configured.
 
 ## Deploy on Render
 
@@ -86,6 +99,7 @@ Sync workers start automatically once credentials are configured.
 - **Release command (optional):** `npm run db:migrate`
 - Set all env vars from `.env.example`
 - Set `FRONTEND_URL` to your Vercel domain for CORS
+- Register OAuth redirect: `https://<render-app>/api/amazon/callback`
 - Use Neon's **pooled** connection string for `DATABASE_URL`
 
 ## Security
@@ -93,4 +107,4 @@ Sync workers start automatically once credentials are configured.
 - Never commit `.env`
 - Refresh tokens encrypted at rest (AES-256-GCM)
 - JWT expires in 15 minutes
-- Admin role required for sync trigger and account updates
+- Admin role required for sync trigger, account management, and OAuth

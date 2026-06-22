@@ -25,3 +25,15 @@ export async function runFinanceSyncWorker(): Promise<void> {
   logger.info('Running finance sync worker');
   await runSyncForAllAccounts('finance');
 }
+
+export async function runListingsSyncWorker(): Promise<void> {
+  if (!isAmazonConfigured()) return;
+  logger.info('Running listings sync worker');
+  await runSyncForAllAccounts('listings');
+}
+
+export async function runReportsSyncWorker(): Promise<void> {
+  if (!isAmazonConfigured()) return;
+  logger.info('Running reports sync worker');
+  await runSyncForAllAccounts('reports');
+}

@@ -10,15 +10,30 @@ export async function syncFinanceForAccount(account: SellerAccount): Promise<num
   for (const event of events) {
     const eventType = (event.eventType as string) || 'unknown';
     const amount = extractAmount(event);
+    const amazonOrderId = (event.AmazonOrderId as string) || null;
+    const feeType = extractFeeType(event);
+    const postedDate = event.PostedDate ? new Date(event.PostedDate as string) : new Date();
+
+    const existing = await FinancialEvent.findOne({
+      where: {
+        account_id: account.id,
+        amazon_order_id: amazonOrderId,
+        event_type: eventType,
+        fee_type: feeType,
+        posted_date: postedDate,
+      },
+    });
+
+    if (existing) continue;
 
     await FinancialEvent.create({
       account_id: account.id,
-      amazon_order_id: (event.AmazonOrderId as string) || null,
+      amazon_order_id: amazonOrderId,
       event_type: eventType,
       amount,
       currency: extractCurrency(event),
-      fee_type: extractFeeType(event),
-      posted_date: event.PostedDate ? new Date(event.PostedDate as string) : new Date(),
+      fee_type: feeType,
+      posted_date: postedDate,
       raw_data: event,
     });
     synced++;

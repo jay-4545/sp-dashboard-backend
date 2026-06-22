@@ -1,9 +1,8 @@
-import axios from 'axios';
-import { amazonConfig } from '../../config/amazon';
 import { SellerAccount } from '../../models';
-import { getAccessTokenForAccount } from './auth.service';
 import { withRateLimit } from '../../utils/amazonRateLimit';
 import { withRetry } from '../../utils/retry';
+import { spApiRequest } from './spApiClient';
+import { logger } from '../../utils/logger';
 
 interface InventorySummary {
   asin?: string;
@@ -19,35 +18,45 @@ interface InventorySummary {
   };
 }
 
+interface InventoryResponse {
+  payload?: { inventorySummaries?: InventorySummary[] };
+  pagination?: { nextToken?: string };
+}
+
 export async function fetchInventorySummaries(
   account: SellerAccount
 ): Promise<InventorySummary[]> {
-  const accessToken = await getAccessTokenForAccount(account.id);
-  const endpoint = amazonConfig.getEndpoint(account.region);
   const allSummaries: InventorySummary[] = [];
   let nextToken: string | undefined;
 
-  do {
-    const params: Record<string, string> = {
-      granularityType: 'Marketplace',
-      granularityId: account.marketplace_id,
-      marketplaceIds: account.marketplace_id,
-    };
-    if (nextToken) params.nextToken = nextToken;
+  try {
+    do {
+      const params: Record<string, string> = {
+        granularityType: 'Marketplace',
+        granularityId: account.marketplace_id,
+        marketplaceIds: account.marketplace_id,
+        details: 'true',
+      };
+      if (nextToken) params.nextToken = nextToken;
 
-    const response = await withRateLimit(account.id, () =>
-      withRetry(() =>
-        axios.get(`${endpoint}/fba/inventory/v1/summaries`, {
-          params,
-          headers: { 'x-amz-access-token': accessToken },
-        })
-      )
-    );
+      const data = await withRateLimit(account.id, () =>
+        withRetry(() =>
+          spApiRequest<InventoryResponse>(account, 'GET', '/fba/inventory/v1/summaries', { params })
+        )
+      );
 
-    const summaries = response.data.payload?.inventorySummaries || [];
-    allSummaries.push(...summaries);
-    nextToken = response.data.pagination?.nextToken;
-  } while (nextToken);
+      const summaries = data.payload?.inventorySummaries || [];
+      allSummaries.push(...summaries);
+      nextToken = data.pagination?.nextToken;
+    } while (nextToken);
+  } catch (error) {
+    const message = (error as Error).message;
+    if (message.includes('not registered in marketplace')) {
+      logger.warn(`Skipping FBA inventory for ${account.name}: seller not enrolled in FBA for this marketplace`);
+      return [];
+    }
+    throw error;
+  }
 
   return allSummaries;
 }

@@ -6,19 +6,15 @@ import { logger } from '../../utils/logger';
 import { syncOrdersForAccount } from './orders.sync';
 import { syncInventoryForAccount } from './inventory.sync';
 import { syncFinanceForAccount } from './finance.sync';
+import { syncReportsForAccount } from './reports.sync';
+import { syncListingsForAccount } from './listings.sync';
 
 const syncHandlers: Record<SyncType, (account: SellerAccount) => Promise<number>> = {
   orders: syncOrdersForAccount,
   inventory: syncInventoryForAccount,
   finance: syncFinanceForAccount,
-  reports: async () => {
-    logger.info('Reports sync handled by reports worker');
-    return 0;
-  },
-  listings: async () => {
-    logger.info('Listings sync handled by listings worker');
-    return 0;
-  },
+  reports: syncReportsForAccount,
+  listings: syncListingsForAccount,
 };
 
 export async function runSyncForAccount(accountId: string, syncType: SyncType) {

@@ -4,7 +4,10 @@ import { fetchOrders, fetchOrderItems } from '../amazon/orders.service';
 import { logger } from '../../utils/logger';
 
 export async function syncOrdersForAccount(account: SellerAccount): Promise<number> {
-  const lastSync = account.last_synced_at || new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+  const minLastUpdated = new Date(Date.now() - 3 * 60 * 1000);
+  const lastSync = account.last_synced_at
+    ? new Date(Math.min(account.last_synced_at.getTime(), minLastUpdated.getTime()))
+    : new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
   const amazonOrders = await fetchOrders(account, lastSync);
   let synced = 0;
 

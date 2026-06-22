@@ -1,4 +1,4 @@
-import { Op, fn, col, literal, WhereOptions } from 'sequelize';
+import { Op, fn, col, WhereOptions } from 'sequelize';
 import {
   SellerAccount,
   Order,
@@ -7,44 +7,6 @@ import {
   FinancialEvent,
   SyncJob,
 } from '../models';
-import { AppError } from '../middleware/error.middleware';
-
-export async function listAccounts() {
-  const accounts = await SellerAccount.findAll({
-    attributes: [
-      'id',
-      'name',
-      'seller_id',
-      'marketplace_id',
-      'region',
-      'is_active',
-      'last_synced_at',
-      'created_at',
-    ],
-    order: [['name', 'ASC']],
-  });
-  return accounts;
-}
-
-export async function updateAccount(
-  id: string,
-  data: { name?: string; is_active?: boolean }
-) {
-  const account = await SellerAccount.findByPk(id);
-  if (!account) {
-    throw new AppError(404, 'Account not found');
-  }
-  await account.update(data);
-  return {
-    id: account.id,
-    name: account.name,
-    seller_id: account.seller_id,
-    marketplace_id: account.marketplace_id,
-    region: account.region,
-    is_active: account.is_active,
-    last_synced_at: account.last_synced_at,
-  };
-}
 
 export interface DashboardFilters {
   accountId?: string;
@@ -55,8 +17,13 @@ export interface DashboardFilters {
 function buildDateFilter(startDate?: string, endDate?: string) {
   if (!startDate && !endDate) return undefined;
   const filter: Record<symbol, Date> = {};
-  if (startDate) filter[Op.gte] = new Date(startDate);
-  if (endDate) filter[Op.lte] = new Date(endDate);
+  if (startDate) {
+    filter[Op.gte] = new Date(`${startDate}T00:00:00.000Z`);
+  }
+  if (endDate) {
+    // Inclusive end date — `new Date('YYYY-MM-DD')` is midnight, which excludes same-day orders
+    filter[Op.lte] = new Date(`${endDate}T23:59:59.999Z`);
+  }
   return filter;
 }
 
@@ -95,7 +62,7 @@ export async function getDashboardSummary(filters: DashboardFilters) {
         [fn('SUM', col('item_price')), 'totalRevenue'],
       ],
       group: ['sku', 'asin'],
-      order: [[literal('totalRevenue'), 'DESC']],
+      order: [[fn('SUM', col('item_price')), 'DESC']],
       limit: 10,
       raw: true,
     }),
@@ -126,6 +93,7 @@ export async function getDashboardSummary(filters: DashboardFilters) {
 export interface OrdersQuery {
   accountId?: string;
   status?: string;
+  search?: string;
   startDate?: string;
   endDate?: string;
   page?: number;
@@ -143,7 +111,38 @@ export async function getOrders(query: OrdersQuery) {
   const dateFilter = buildDateFilter(query.startDate, query.endDate);
   if (dateFilter) where.purchase_date = dateFilter;
 
-  const { rows, count } = await Order.findAndCountAll({
+  if (query.search) {
+    const term = `%${query.search}%`;
+    const itemWhere: WhereOptions = {
+      [Op.or]: [
+        { sku: { [Op.iLike]: term } },
+        { asin: { [Op.iLike]: term } },
+      ],
+    };
+    if (query.accountId) itemWhere.account_id = query.accountId;
+
+    const matchingItems = await OrderItem.findAll({
+      attributes: ['order_id'],
+      where: itemWhere,
+      group: ['order_id'],
+      raw: true,
+    });
+    const orderIdsFromItems = matchingItems.map(
+      (row) => (row as { order_id: string }).order_id
+    );
+
+    const searchConditions: WhereOptions[] = [
+      { amazon_order_id: { [Op.iLike]: term } },
+    ];
+    if (orderIdsFromItems.length > 0) {
+      searchConditions.push({ id: { [Op.in]: orderIdsFromItems } });
+    }
+    where[Op.or] = searchConditions;
+  }
+
+  const count = await Order.count({ where });
+
+  const rows = await Order.findAll({
     where,
     include: [
       { model: SellerAccount, as: 'account', attributes: ['name'] },
@@ -160,6 +159,7 @@ export async function getOrders(query: OrdersQuery) {
 export interface InventoryQuery {
   accountId?: string;
   lowStock?: boolean;
+  search?: string;
   page?: number;
   limit?: number;
 }
@@ -172,6 +172,14 @@ export async function getInventory(query: InventoryQuery) {
   const where: WhereOptions = {};
   if (query.accountId) where.account_id = query.accountId;
   if (query.lowStock) where.sellable_qty = { [Op.lt]: 10 };
+  if (query.search) {
+    const term = `%${query.search}%`;
+    where[Op.or] = [
+      { sku: { [Op.iLike]: term } },
+      { asin: { [Op.iLike]: term } },
+      { fnsku: { [Op.iLike]: term } },
+    ];
+  }
 
   const { rows, count } = await InventorySnapshot.findAndCountAll({
     where,
@@ -186,6 +194,7 @@ export async function getInventory(query: InventoryQuery) {
 
 export interface FinanceEventsQuery {
   accountId?: string;
+  search?: string;
   startDate?: string;
   endDate?: string;
   page?: number;
@@ -201,6 +210,14 @@ export async function getFinanceEvents(query: FinanceEventsQuery) {
   if (query.accountId) where.account_id = query.accountId;
   const dateFilter = buildDateFilter(query.startDate, query.endDate);
   if (dateFilter) where.posted_date = dateFilter;
+  if (query.search) {
+    const term = `%${query.search}%`;
+    where[Op.or] = [
+      { amazon_order_id: { [Op.iLike]: term } },
+      { event_type: { [Op.iLike]: term } },
+      { fee_type: { [Op.iLike]: term } },
+    ];
+  }
 
   const { rows, count } = await FinancialEvent.findAndCountAll({
     where,

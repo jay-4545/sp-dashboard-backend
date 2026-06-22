@@ -11,11 +11,13 @@ import { logger } from './utils/logger';
 
 import authRoutes from './routes/auth.routes';
 import accountsRoutes from './routes/accounts.routes';
+import amazonRoutes from './routes/amazon.routes';
 import dashboardRoutes from './routes/dashboard.routes';
 import ordersRoutes from './routes/orders.routes';
 import inventoryRoutes from './routes/inventory.routes';
 import financeRoutes from './routes/finance.routes';
 import syncRoutes from './routes/sync.routes';
+import productsRoutes from './routes/products.routes';
 
 const app = express();
 
@@ -37,11 +39,13 @@ app.get('/health', (_req, res) => {
 
 app.use('/api/auth', authRoutes);
 app.use('/api/accounts', accountsRoutes);
+app.use('/api/amazon', amazonRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/orders', ordersRoutes);
 app.use('/api/inventory', inventoryRoutes);
 app.use('/api/finance', financeRoutes);
 app.use('/api/sync', syncRoutes);
+app.use('/api/products', productsRoutes);
 
 app.use(notFoundHandler);
 app.use(errorHandler);

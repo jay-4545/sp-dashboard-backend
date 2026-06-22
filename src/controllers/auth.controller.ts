@@ -27,3 +27,23 @@ export async function me(req: AuthRequest, res: Response, next: NextFunction) {
     next(err);
   }
 }
+
+export async function refresh(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    const { refreshToken } = req.body;
+    const result = await authService.refreshSession(refreshToken);
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function logout(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    const { refreshToken } = req.body;
+    const result = await authService.logout(refreshToken);
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+}

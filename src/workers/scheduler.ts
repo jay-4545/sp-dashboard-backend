@@ -6,6 +6,8 @@ import {
   runOrderSyncWorker,
   runInventorySyncWorker,
   runFinanceSyncWorker,
+  runListingsSyncWorker,
+  runReportsSyncWorker,
 } from './tokenRefresh.worker';
 
 export function startScheduler(): void {
@@ -36,6 +38,18 @@ export function startScheduler(): void {
   cron.schedule('0 */6 * * *', () => {
     runFinanceSyncWorker().catch((err) =>
       logger.error('Finance sync worker error', { error: err.message })
+    );
+  });
+
+  cron.schedule('0 2 * * *', () => {
+    runListingsSyncWorker().catch((err) =>
+      logger.error('Listings sync worker error', { error: err.message })
+    );
+  });
+
+  cron.schedule('0 3 * * *', () => {
+    runReportsSyncWorker().catch((err) =>
+      logger.error('Reports sync worker error', { error: err.message })
     );
   });
 

@@ -1,29 +1,36 @@
 import axios from 'axios';
-import { amazonConfig } from '../../config/amazon';
 import { SellerAccount } from '../../models';
-import { getAccessTokenForAccount } from './auth.service';
 import { withRateLimit } from '../../utils/amazonRateLimit';
 import { withRetry } from '../../utils/retry';
 import { logger } from '../../utils/logger';
+import { spApiRequest } from './spApiClient';
+
+interface CreateReportResponse {
+  reportId?: string;
+}
+
+interface ReportStatusResponse {
+  processingStatus?: string;
+  reportDocumentId?: string;
+}
+
+interface ReportDocumentResponse {
+  url?: string;
+}
 
 export async function requestSettlementReport(account: SellerAccount): Promise<string | null> {
-  const accessToken = await getAccessTokenForAccount(account.id);
-  const endpoint = amazonConfig.getEndpoint(account.region);
-
-  const response = await withRateLimit(account.id, () =>
+  const data = await withRateLimit(account.id, () =>
     withRetry(() =>
-      axios.post(
-        `${endpoint}/reports/2021-06-30/reports`,
-        {
+      spApiRequest<CreateReportResponse>(account, 'POST', '/reports/2021-06-30/reports', {
+        data: {
           reportType: 'GET_V2_SETTLEMENT_REPORT_DATA_FLAT_FILE_V2',
           marketplaceIds: [account.marketplace_id],
         },
-        { headers: { 'x-amz-access-token': accessToken, 'Content-Type': 'application/json' } }
-      )
+      })
     )
   );
 
-  return response.data.reportId || null;
+  return data.reportId || null;
 }
 
 export async function pollReportStatus(
@@ -31,17 +38,16 @@ export async function pollReportStatus(
   reportId: string,
   maxAttempts = 30
 ): Promise<string | null> {
-  const accessToken = await getAccessTokenForAccount(account.id);
-  const endpoint = amazonConfig.getEndpoint(account.region);
-
   for (let i = 0; i < maxAttempts; i++) {
-    const response = await axios.get(`${endpoint}/reports/2021-06-30/reports/${reportId}`, {
-      headers: { 'x-amz-access-token': accessToken },
-    });
+    const data = await spApiRequest<ReportStatusResponse>(
+      account,
+      'GET',
+      `/reports/2021-06-30/reports/${reportId}`
+    );
 
-    const status = response.data.processingStatus;
+    const status = data.processingStatus;
     if (status === 'DONE') {
-      return response.data.reportDocumentId;
+      return data.reportDocumentId || null;
     }
     if (status === 'FATAL' || status === 'CANCELLED') {
       logger.error(`Report ${reportId} failed with status ${status}`);
@@ -58,15 +64,19 @@ export async function downloadReport(
   account: SellerAccount,
   reportDocumentId: string
 ): Promise<string> {
-  const accessToken = await getAccessTokenForAccount(account.id);
-  const endpoint = amazonConfig.getEndpoint(account.region);
-
-  const docResponse = await axios.get(
-    `${endpoint}/reports/2021-06-30/documents/${reportDocumentId}`,
-    { headers: { 'x-amz-access-token': accessToken } }
+  const docData = await spApiRequest<ReportDocumentResponse>(
+    account,
+    'GET',
+    `/reports/2021-06-30/documents/${reportDocumentId}`
   );
 
-  const downloadUrl = docResponse.data.url;
+  const downloadUrl = docData.url;
+  if (!downloadUrl) {
+    throw new Error('Report document URL not available');
+  }
+
   const reportResponse = await axios.get(downloadUrl);
-  return typeof reportResponse.data === 'string' ? reportResponse.data : JSON.stringify(reportResponse.data);
+  return typeof reportResponse.data === 'string'
+    ? reportResponse.data
+    : JSON.stringify(reportResponse.data);
 }
