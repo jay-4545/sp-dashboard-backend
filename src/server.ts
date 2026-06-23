@@ -7,6 +7,7 @@ import './models';
 import { apiRateLimiter } from './middleware/rateLimit.middleware';
 import { errorHandler, notFoundHandler } from './middleware/error.middleware';
 import { startScheduler } from './workers/scheduler';
+import { expireOrphanedSyncJobsOnStartup } from './services/sync/syncRunner';
 import { logger } from './utils/logger';
 
 import authRoutes from './routes/auth.routes';
@@ -54,6 +55,11 @@ async function bootstrap() {
   try {
     await connectDatabase();
     logger.info('Database connected');
+
+    const orphaned = await expireOrphanedSyncJobsOnStartup();
+    if (orphaned > 0) {
+      logger.info(`Cleared ${orphaned} stuck sync job(s) from previous run`);
+    }
 
     startScheduler();
 

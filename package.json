@@ -11,7 +11,9 @@
     "db:migrate:undo": "sequelize-cli db:migrate:undo",
     "db:seed": "sequelize-cli db:seed:all",
     "db:seed:undo": "sequelize-cli db:seed:undo:all",
-    "encrypt-token": "tsx src/encrypt-token.ts"
+    "encrypt-token": "tsx src/encrypt-token.ts",
+    "clear-finance": "tsx src/clear-finance-data.ts",
+    "reset-stuck-sync": "tsx src/reset-stuck-sync.ts"
   },
   "dependencies": {
     "@aws-sdk/client-sts": "^3.700.0",

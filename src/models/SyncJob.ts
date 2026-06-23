@@ -1,6 +1,6 @@
 import { Model, DataTypes, Optional, Sequelize } from 'sequelize';
 
-export type SyncType = 'orders' | 'inventory' | 'finance' | 'reports' | 'listings';
+export type SyncType = 'orders' | 'inventory' | 'finance' | 'reports' | 'listings' | 'products';
 export type SyncJobStatus = 'running' | 'success' | 'failed';
 
 export interface SyncJobAttributes {
@@ -40,7 +40,7 @@ export function initSyncJobModel(sequelize: Sequelize): typeof SyncJob {
       id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
       account_id: { type: DataTypes.UUID, allowNull: false },
       sync_type: {
-        type: DataTypes.ENUM('orders', 'inventory', 'finance', 'reports', 'listings'),
+        type: DataTypes.ENUM('orders', 'inventory', 'finance', 'reports', 'listings', 'products'),
         allowNull: false,
       },
       status: {

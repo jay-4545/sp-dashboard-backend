@@ -8,6 +8,10 @@ import { syncInventoryForAccount } from './inventory.sync';
 import { syncFinanceForAccount } from './finance.sync';
 import { syncReportsForAccount } from './reports.sync';
 import { syncListingsForAccount } from './listings.sync';
+import { expireOrphanedSyncJobsOnStartup, expireStaleRunningJob } from './syncJobUtils';
+import { syncProductsForAccount } from './products.sync';
+
+export { expireOrphanedSyncJobsOnStartup, resetStuckSyncJobs } from './syncJobUtils';
 
 const syncHandlers: Record<SyncType, (account: SellerAccount) => Promise<number>> = {
   orders: syncOrdersForAccount,
@@ -15,6 +19,7 @@ const syncHandlers: Record<SyncType, (account: SellerAccount) => Promise<number>
   finance: syncFinanceForAccount,
   reports: syncReportsForAccount,
   listings: syncListingsForAccount,
+  products: syncProductsForAccount,   
 };
 
 export async function runSyncForAccount(accountId: string, syncType: SyncType) {
@@ -43,6 +48,12 @@ export async function runSyncForAccount(accountId: string, syncType: SyncType) {
       finished_at: new Date(),
     });
     return job;
+  }
+
+  const blockingJob = await expireStaleRunningJob(accountId, syncType, account.name);
+  if (blockingJob) {
+    logger.warn(`Sync already running: ${syncType} for ${account.name}`);
+    return blockingJob;
   }
 
   const job = await SyncJob.create({
