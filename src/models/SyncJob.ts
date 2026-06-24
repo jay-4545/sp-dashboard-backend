@@ -21,7 +21,10 @@ export type SyncJobCreationAttributes = Optional<
   'id' | 'status' | 'records_synced' | 'error_message' | 'started_at' | 'finished_at'
 >;
 
-export class SyncJob extends Model<SyncJobAttributes, SyncJobCreationAttributes> implements SyncJobAttributes {
+export class SyncJob
+  extends Model<SyncJobAttributes, SyncJobCreationAttributes>
+  implements SyncJobAttributes
+{
   declare id: string;
   declare account_id: string;
   declare sync_type: SyncType;
@@ -39,15 +42,29 @@ export function initSyncJobModel(sequelize: Sequelize): typeof SyncJob {
     {
       id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
       account_id: { type: DataTypes.UUID, allowNull: false },
+
+      // DataTypes.STRING vaapro — DataTypes.ENUM nahi.
+      // Reason: DB ma sync_type VARCHAR tarike create thayel chhe (ENUM nahi).
+      // Sequelize ENUM use karo to "type does not exist" runtime error aave.
+      // TypeScript type safety SyncType union thi j milchhe.
       sync_type: {
-        type: DataTypes.ENUM('orders', 'inventory', 'finance', 'reports', 'listings', 'products'),
+        type: DataTypes.STRING(20),
         allowNull: false,
+        validate: {
+          isIn: [['orders', 'inventory', 'finance', 'reports', 'listings', 'products']],
+        },
       },
+
+      // Same logic for status — VARCHAR safer che.
       status: {
-        type: DataTypes.ENUM('running', 'success', 'failed'),
+        type: DataTypes.STRING(10),
         allowNull: false,
         defaultValue: 'running',
+        validate: {
+          isIn: [['running', 'success', 'failed']],
+        },
       },
+
       records_synced: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
       error_message: { type: DataTypes.TEXT, allowNull: true },
       started_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },

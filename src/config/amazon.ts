@@ -2,26 +2,25 @@ import { env } from './index';
 
 export const AMAZON_LWA_URL = 'https://api.amazon.com/auth/o2/token';
 
-export type SpApiRegion = 'NA' | 'EU' | 'FE' | 'IN';
+/**
+ * India-only deployment. Fakt IN region rakhyu che; NA/EU/FE kaadhi naakhya.
+ * Amazon.in EU endpoint par serve thay che, signing region eu-west-1.
+ */
+export type SpApiRegion = 'IN';
+
+export const INDIA_MARKETPLACE_ID = 'A21TJRUUN4KGV';
 
 export const SP_API_ENDPOINTS: Record<SpApiRegion, string> = {
-  NA: 'https://sellingpartnerapi-na.amazon.com',
-  EU: 'https://sellingpartnerapi-eu.amazon.com',
-  FE: 'https://sellingpartnerapi-fe.amazon.com',
   IN: 'https://sellingpartnerapi-eu.amazon.com',
 };
 
 export const SP_API_SANDBOX_ENDPOINTS: Record<SpApiRegion, string> = {
-  NA: 'https://sandbox.sellingpartnerapi-na.amazon.com',
-  EU: 'https://sandbox.sellingpartnerapi-eu.amazon.com',
-  FE: 'https://sandbox.sellingpartnerapi-fe.amazon.com',
   IN: 'https://sandbox.sellingpartnerapi-eu.amazon.com',
 };
 
-export function getSigningRegion(region: SpApiRegion): string {
-  if (region === 'EU' || region === 'IN') return 'eu-west-1';
-  if (region === 'FE') return 'us-west-2';
-  return 'us-east-1';
+export function getSigningRegion(_region: SpApiRegion = 'IN'): string {
+  // Amazon.in → EU signing region.
+  return 'eu-west-1';
 }
 
 export const amazonConfig = {
@@ -29,7 +28,8 @@ export const amazonConfig = {
   clientSecret: env.AMAZON_CLIENT_SECRET,
   region: env.AMAZON_REGION,
   lwaUrl: AMAZON_LWA_URL,
-  getEndpoint(region: SpApiRegion): string {
-    return SP_API_ENDPOINTS[region] || SP_API_ENDPOINTS.NA;
+  marketplaceId: INDIA_MARKETPLACE_ID,
+  getEndpoint(_region: SpApiRegion = 'IN'): string {
+    return SP_API_ENDPOINTS.IN;
   },
 };

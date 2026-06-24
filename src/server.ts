@@ -19,6 +19,7 @@ import inventoryRoutes from './routes/inventory.routes';
 import financeRoutes from './routes/finance.routes';
 import syncRoutes from './routes/sync.routes';
 import productsRoutes from './routes/products.routes';
+import sellerProfitRoutes from './routes/sellerProfit.routes';
 
 const app = express();
 
@@ -47,6 +48,7 @@ app.use('/api/inventory', inventoryRoutes);
 app.use('/api/finance', financeRoutes);
 app.use('/api/sync', syncRoutes);
 app.use('/api/products', productsRoutes);
+app.use('/api/seller-profit', sellerProfitRoutes);
 
 app.use(notFoundHandler);
 app.use(errorHandler);

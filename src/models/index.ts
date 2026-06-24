@@ -7,6 +7,7 @@ import { initOrderItemModel, OrderItem } from './OrderItem';
 import { initInventorySnapshotModel, InventorySnapshot } from './InventorySnapshot';
 import { initFinancialEventModel, FinancialEvent } from './FinancialEvent';
 import { initProductModel, Product } from './Product';
+import { initProductCostModel, ProductCost } from './ProductCost';
 import { initSyncJobModel, SyncJob } from './SyncJob';
 import { initRefreshTokenModel, RefreshToken } from './RefreshToken';
 
@@ -18,6 +19,7 @@ export function initModels(db: Sequelize = sequelize) {
   initInventorySnapshotModel(db);
   initFinancialEventModel(db);
   initProductModel(db);
+  initProductCostModel(db);
   initSyncJobModel(db);
   initRefreshTokenModel(db);
 
@@ -42,6 +44,9 @@ export function initModels(db: Sequelize = sequelize) {
   SellerAccount.hasMany(Product, { foreignKey: 'account_id', as: 'products' });
   Product.belongsTo(SellerAccount, { foreignKey: 'account_id', as: 'account' });
 
+  SellerAccount.hasMany(ProductCost, { foreignKey: 'account_id', as: 'productCosts' });
+  ProductCost.belongsTo(SellerAccount, { foreignKey: 'account_id', as: 'account' });
+
   SellerAccount.hasMany(SyncJob, { foreignKey: 'account_id', as: 'syncJobs' });
   SyncJob.belongsTo(SellerAccount, { foreignKey: 'account_id', as: 'account' });
 
@@ -53,6 +58,7 @@ export function initModels(db: Sequelize = sequelize) {
     InventorySnapshot,
     FinancialEvent,
     Product,
+    ProductCost,
     SyncJob,
     RefreshToken,
   };
@@ -69,6 +75,7 @@ export {
   InventorySnapshot,
   FinancialEvent,
   Product,
+  ProductCost,
   SyncJob,
   RefreshToken,
 };

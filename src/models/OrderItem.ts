@@ -1,5 +1,15 @@
 import { Model, DataTypes, Optional, Sequelize } from 'sequelize';
 
+/**
+ * OrderItem ma have COGS snapshot store thay che. Jyare order sync thay tyare
+ * te SKU no je cost order ni purchase_date par effective hato te `unit_cost`
+ * ma copy thay che. Aathi pachhi cost badle to pan juna order no profit
+ * badlato nathi (point-in-time accurate accounting).
+ *
+ *   - unit_cost   : per-unit landed COGS (snapshot).
+ *   - total_cost  : unit_cost * quantity.
+ *   - is_returned : aa item return/refund thayu che?
+ */
 export interface OrderItemAttributes {
   id: string;
   order_id: string;
@@ -11,13 +21,26 @@ export interface OrderItemAttributes {
   item_price: number | null;
   item_tax: number | null;
   promotion_discount: number | null;
+  unit_cost: number | null;
+  total_cost: number | null;
+  is_returned: boolean;
   created_at?: Date;
   updated_at?: Date;
 }
 
 export type OrderItemCreationAttributes = Optional<
   OrderItemAttributes,
-  'id' | 'asin' | 'sku' | 'title' | 'quantity' | 'item_price' | 'item_tax' | 'promotion_discount'
+  | 'id'
+  | 'asin'
+  | 'sku'
+  | 'title'
+  | 'quantity'
+  | 'item_price'
+  | 'item_tax'
+  | 'promotion_discount'
+  | 'unit_cost'
+  | 'total_cost'
+  | 'is_returned'
 >;
 
 export class OrderItem
@@ -34,6 +57,9 @@ export class OrderItem
   declare item_price: number | null;
   declare item_tax: number | null;
   declare promotion_discount: number | null;
+  declare unit_cost: number | null;
+  declare total_cost: number | null;
+  declare is_returned: boolean;
   declare readonly created_at: Date;
   declare readonly updated_at: Date;
 }
@@ -51,6 +77,9 @@ export function initOrderItemModel(sequelize: Sequelize): typeof OrderItem {
       item_price: { type: DataTypes.DECIMAL(12, 2), allowNull: true },
       item_tax: { type: DataTypes.DECIMAL(12, 2), allowNull: true },
       promotion_discount: { type: DataTypes.DECIMAL(12, 2), allowNull: true },
+      unit_cost: { type: DataTypes.DECIMAL(12, 2), allowNull: true },
+      total_cost: { type: DataTypes.DECIMAL(12, 2), allowNull: true },
+      is_returned: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
     },
     { sequelize, tableName: 'order_items', underscored: true }
   );

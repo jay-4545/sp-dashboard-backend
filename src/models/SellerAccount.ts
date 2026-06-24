@@ -1,6 +1,12 @@
 import { Model, DataTypes, Optional, Sequelize } from 'sequelize';
 
-export type SellerRegion = 'NA' | 'EU' | 'FE' | 'IN';
+/**
+ * India-only deployment: region hammesha 'IN' che. NA/EU/FE kaadhi naakhya che.
+ * marketplace_id default Amazon.in (A21TJRUUN4KGV).
+ */
+export type SellerRegion = 'IN';
+
+export const INDIA_MARKETPLACE_ID = 'A21TJRUUN4KGV';
 
 export interface SellerAccountAttributes {
   id: string;
@@ -19,7 +25,14 @@ export interface SellerAccountAttributes {
 
 export type SellerAccountCreationAttributes = Optional<
   SellerAccountAttributes,
-  'id' | 'refresh_token' | 'access_token' | 'token_expires_at' | 'is_active' | 'last_synced_at'
+  | 'id'
+  | 'marketplace_id'
+  | 'region'
+  | 'refresh_token'
+  | 'access_token'
+  | 'token_expires_at'
+  | 'is_active'
+  | 'last_synced_at'
 >;
 
 export class SellerAccount
@@ -50,11 +63,15 @@ export function initSellerAccountModel(sequelize: Sequelize): typeof SellerAccou
       },
       name: { type: DataTypes.STRING(100), allowNull: false },
       seller_id: { type: DataTypes.STRING(50), allowNull: false, unique: true },
-      marketplace_id: { type: DataTypes.STRING(50), allowNull: false },
+      marketplace_id: {
+        type: DataTypes.STRING(50),
+        allowNull: false,
+        defaultValue: INDIA_MARKETPLACE_ID,
+      },
       region: {
-        type: DataTypes.ENUM('NA', 'EU', 'FE', 'IN'),
-        allowNull: false, 
-        defaultValue: 'NA',
+        type: DataTypes.ENUM('IN'),
+        allowNull: false,
+        defaultValue: 'IN',
       },
       refresh_token: { type: DataTypes.TEXT, allowNull: true },
       access_token: { type: DataTypes.TEXT, allowNull: true },

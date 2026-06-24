@@ -1,25 +1,19 @@
 import { Op } from 'sequelize';
-import { SellerAccount, Order, FinancialEvent } from '../../models';
+import { SellerAccount, Order, OrderItem, FinancialEvent } from '../../models';
 import { fetchFinancialEvents } from '../amazon/finance.service';
-import { expandFinancialEvent } from '../../utils/financeEventParser';
+import { expandFinancialEvent, getEffectiveFinanceLines } from '../../utils/financeEventParser';
 import { buildFinanceLineKey } from '../../utils/financeDedupe';
-import {
-  dedupeFinancialEvents,
-  cleanupNullAmountDuplicates,
-} from '../../utils/financeDedupe';
+import { dedupeFinancialEvents, cleanupNullAmountDuplicates } from '../../utils/financeDedupe';
 
 /**
- * PERFORMANCE-OPTIMIZED finance sync.
+ * Performance-optimized finance sync (India-only).
  *
- * Junu version har financial line mate 2 DB query karto hato (findOne + create).
- * 4415 events = ~9000 sequential queries = bahuj slow.
- *
- * Navu version:
- *   1. Account na BADHA existing events ek j query ma load kare (key set banave).
- *   2. Amazon na events parse kare, in-memory dedupe kare.
- *   3. Fakt NAVA rows ne `bulkCreate` thi batch ma insert kare.
- *
- * Result: ~9000 query mathi ghatine ~5-10 query. 10-50x faster.
+ * Pipeline:
+ *   1. Cleanup juna duplicates / null amounts.
+ *   2. Amazon thi events fetch karo, parse + in-memory dedupe.
+ *   3. Nava rows bulkCreate.
+ *   4. NAVU: refunds ne order par roll-up karo — is_refunded, refund_amount,
+ *      ane cogs_lost (return thi gumayeli product cost) set thay.
  */
 
 const EPOCH_DATE = new Date('1970-01-01T00:00:00.000Z');
@@ -37,7 +31,6 @@ interface PendingEvent {
 }
 
 export async function syncFinanceForAccount(account: SellerAccount): Promise<number> {
-  // Cleanup steps (juna duplicates / null amounts) — ek vaar chale.
   const cleaned = await cleanupNullAmountDuplicates(account.id);
   const deduped = await dedupeFinancialEvents(account.id);
   const backfilled = await backfillNullAmounts(account.id);
@@ -45,14 +38,11 @@ export async function syncFinanceForAccount(account: SellerAccount): Promise<num
   const orderDateCache = await loadOrderDateCache(account.id);
   const datesFixed = await fixEpochPostedDates(account.id, orderDateCache);
 
-  // 1. BADHA existing event keys ek j query ma load karo (in-memory dedupe mate).
   const existingKeys = await loadExistingEventKeys(account.id);
 
-  // 2. Amazon thi events fetch karo.
   const postedAfter = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
   const events = await fetchFinancialEvents(account, postedAfter);
 
-  // 3. Parse + in-memory dedupe → pending insert list banavo.
   const toInsert: PendingEvent[] = [];
   const seenInThisRun = new Set<string>();
 
@@ -63,44 +53,33 @@ export async function syncFinanceForAccount(account: SellerAccount): Promise<num
     const lines = expandFinancialEvent(event);
 
     if (lines.length === 0) {
-      queueIfNew(
-        toInsert,
-        existingKeys,
-        seenInThisRun,
-        {
-          account_id: account.id,
-          amazon_order_id: amazonOrderId,
-          event_type: eventType,
-          amount: null,
-          currency: 'INR',
-          fee_type: null,
-          posted_date: postedDate,
-          raw_data: event,
-        }
-      );
+      queueIfNew(toInsert, existingKeys, seenInThisRun, {
+        account_id: account.id,
+        amazon_order_id: amazonOrderId,
+        event_type: eventType,
+        amount: null,
+        currency: 'INR',
+        fee_type: null,
+        posted_date: postedDate,
+        raw_data: event,
+      });
       continue;
     }
 
     for (const line of lines) {
-      queueIfNew(
-        toInsert,
-        existingKeys,
-        seenInThisRun,
-        {
-          account_id: account.id,
-          amazon_order_id: amazonOrderId,
-          event_type: eventType,
-          amount: line.amount,
-          currency: line.currency,
-          fee_type: line.feeType,
-          posted_date: postedDate,
-          raw_data: event,
-        }
-      );
+      queueIfNew(toInsert, existingKeys, seenInThisRun, {
+        account_id: account.id,
+        amazon_order_id: amazonOrderId,
+        event_type: eventType,
+        amount: line.amount,
+        currency: line.currency,
+        fee_type: line.feeType,
+        posted_date: postedDate,
+        raw_data: event,
+      });
     }
   }
 
-  // 4. Batch insert — har batch ek j query.
   let synced = 0;
   for (let i = 0; i < toInsert.length; i += INSERT_BATCH_SIZE) {
     const batch = toInsert.slice(i, i + INSERT_BATCH_SIZE);
@@ -109,10 +88,101 @@ export async function syncFinanceForAccount(account: SellerAccount): Promise<num
   }
 
   const dedupedAfter = await dedupeFinancialEvents(account.id);
-  return synced + backfilled + cleaned + deduped + dedupedAfter + datesFixed;
+
+  // NAVU: refunds ne order par roll-up karo.
+  const ordersUpdated = await rollupRefundsToOrders(account.id);
+
+  return synced + backfilled + cleaned + deduped + dedupedAfter + datesFixed + ordersUpdated;
 }
 
-/** Ek event ne pending list ma add karo fakt jo e navu hoy (DB ma ya aa run ma na hoy). */
+/* ---------------- Refund roll-up: order par return cost set ---------------- */
+
+/**
+ * Har refund event ne tena order par aggregate kare:
+ *   - refund_amount = kul buyer ne pacha aapeli principal (positive magnitude).
+ *   - is_refunded   = true.
+ *   - cogs_lost     = aa order na returned items no COGS (product pacho na
+ *     vechay sake to loss). Aapne conservatively full COGS loss ganie chie.
+ *     Jo product restock thay to aagal `restockOrderItems()` thi adjust karaay.
+ */
+async function rollupRefundsToOrders(accountId: string): Promise<number> {
+  // 1. Badha refund-kind lines ne order-wise total karo.
+  const refundRows = await FinancialEvent.findAll({
+    where: {
+      account_id: accountId,
+      amazon_order_id: { [Op.ne]: null },
+      event_type: { [Op.iLike]: '%refund%' },
+    },
+  });
+
+  const refundByOrder = new Map<string, number>();
+  const seen = new Set<string>();
+
+  for (const row of refundRows) {
+    const plain = row.toJSON();
+    const lines = getEffectiveFinanceLines(plain);
+    for (const line of lines) {
+      if (line.kind !== 'refund') continue;
+      const key = buildFinanceLineKey({
+        amazon_order_id: plain.amazon_order_id,
+        event_type: plain.event_type,
+        fee_type: line.feeType,
+        amount: line.amount,
+      });
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      const oid = plain.amazon_order_id as string;
+      // Principal refunds negative aave che; positive magnitude store karo.
+      refundByOrder.set(oid, (refundByOrder.get(oid) || 0) + Math.abs(line.amount));
+    }
+  }
+
+  if (refundByOrder.size === 0) return 0;
+
+  // 2. Te orders ane temna items load karo (COGS mate).
+  const orderIds = [...refundByOrder.keys()];
+  const orders = await Order.findAll({
+    where: { account_id: accountId, amazon_order_id: { [Op.in]: orderIds } },
+    include: [{ model: OrderItem, as: 'items', attributes: ['quantity', 'total_cost'] }],
+  });
+
+  let updated = 0;
+  for (const order of orders) {
+    const refundAmount = round2(refundByOrder.get(order.amazon_order_id) || 0);
+    if (refundAmount <= 0) continue;
+
+    const items = (order.get('items') as OrderItem[] | undefined) || [];
+    const cogsLost = round2(items.reduce((s, it) => s + Number(it.total_cost || 0), 0));
+
+    await order.update({
+      is_refunded: true,
+      refund_amount: refundAmount,
+      cogs_lost: cogsLost,
+    });
+
+    // Items ne returned mark karo.
+    await OrderItem.update(
+      { is_returned: true },
+      { where: { order_id: order.id } }
+    );
+
+    updated++;
+  }
+
+  return updated;
+}
+
+/**
+ * Jo koi return product fari sellable thay (restock), to e order no COGS loss
+ * recover thaay che. Aa manual/optional helper che — UI mathi call karaay.
+ */
+export async function markOrderRestocked(orderId: string): Promise<void> {
+  await Order.update({ cogs_lost: 0 }, { where: { id: orderId } });
+}
+
+/* ---------------- existing helpers ---------------- */
+
 function queueIfNew(
   toInsert: PendingEvent[],
   existingKeys: Set<string>,
@@ -125,13 +195,11 @@ function queueIfNew(
     fee_type: data.fee_type,
     amount: data.amount,
   });
-
   if (existingKeys.has(key) || seenInThisRun.has(key)) return;
   seenInThisRun.add(key);
   toInsert.push(data);
 }
 
-/** Account na badha events ek query ma load karine dedupe-key set banave. */
 async function loadExistingEventKeys(accountId: string): Promise<Set<string>> {
   const rows = await FinancialEvent.findAll({
     where: { account_id: accountId },
@@ -170,9 +238,7 @@ async function loadOrderDateCache(accountId: string): Promise<Map<string, Date>>
     amazon_order_id: string;
     purchase_date: Date | null;
   }>) {
-    if (order.purchase_date) {
-      cache.set(order.amazon_order_id, order.purchase_date);
-    }
+    if (order.purchase_date) cache.set(order.amazon_order_id, order.purchase_date);
   }
   return cache;
 }
@@ -185,7 +251,6 @@ async function fixEpochPostedDates(
     where: { account_id: accountId, posted_date: EPOCH_DATE },
   });
 
-  // Group rows by their resolved date so we can issue fewer UPDATEs.
   const updatesByDate = new Map<number, string[]>();
   for (const row of rows) {
     if (!row.amazon_order_id) continue;
@@ -212,15 +277,10 @@ function resolvePostedDate(
   amazonOrderId: string | null,
   orderDateCache: Map<string, Date>
 ): Date {
-  if (event.PostedDate) {
-    return new Date(event.PostedDate as string);
-  }
-
+  if (event.PostedDate) return new Date(event.PostedDate as string);
   if (amazonOrderId && orderDateCache.has(amazonOrderId)) {
     return orderDateCache.get(amazonOrderId)!;
   }
-
-  // Stable fallback — never use new Date() (that created a new row on every sync).
   return EPOCH_DATE;
 }
 
@@ -230,10 +290,8 @@ async function backfillNullAmounts(accountId: string): Promise<number> {
   });
 
   let fixed = 0;
-
   for (const row of rows) {
     if (!row.raw_data) continue;
-
     const lines = expandFinancialEvent(row.raw_data as Record<string, unknown>);
     if (lines.length === 0) continue;
 
@@ -255,13 +313,12 @@ async function backfillNullAmounts(accountId: string): Promise<number> {
       continue;
     }
 
-    await row.update({
-      amount: line.amount,
-      currency: line.currency,
-      fee_type: line.feeType,
-    });
+    await row.update({ amount: line.amount, currency: line.currency, fee_type: line.feeType });
     fixed++;
   }
-
   return fixed;
+}
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
 }

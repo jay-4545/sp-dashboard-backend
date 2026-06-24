@@ -1,48 +1,46 @@
 /**
- * Amazon SP-API Finance Event Parser — FIXED VERSION
+ * Amazon SP-API Finance Event Parser — India-tuned.
  *
- * Amazon SP-API Finances v0 ma 3 alag prakar hoy che:
- *   - CHARGES  (ItemChargeList / OrderChargeList):
- *       ChargeType = "Principal" | "Tax" | "Shipping" | "GiftWrap" ...
- *       Buyer-paid amount → seller REVENUE (sale par positive, refund par negative).
- *   - FEES     (ItemFeeList / OrderFeeList / ShipmentFeeList):
- *       FeeType = "Commission" (referral) | "FBAPerUnitFulfillmentFee" | ...
- *       Amazon DEDUCT kare → seller COST. Amazon pehlethi NEGATIVE aape che.
- *       Kyarey Math.abs() na karvu.
+ * Finances v0 ma 3 mukhya prakar:
+ *   - CHARGES  (ItemChargeList / OrderChargeList): buyer-paid → seller REVENUE
+ *       (sale par +, refund/adjustment par −).
+ *   - FEES     (ItemFeeList / FeeList): Amazon DEDUCT kare → seller COST.
+ *       Amazon pehle thi NEGATIVE aape che. Kyarey Math.abs() na karvu.
  *   - PROMOTIONS (PromotionList): seller-funded discount → negative.
  *
- * Have har line ne ek `kind` male che jethi P&L sahi rite bucket kari shake.
+ * India-specific:
+ *   - TCS-SGST / TCS-CGST / TCS-IGST: Tax Collected at Source → `tax` bucket.
+ *   - FixedClosingFee / RefundCommission / Commission: Amazon fees.
+ *   - MFNPostageFee (ServiceFeeEvent): Amazon shipping label cost → fee.
+ *   - ProductAdsPaymentEvent: advertising cost → fee.
+ *   - SAFETReimbursement: Amazon reimbursement → revenue (positive).
  */
 
 export type FinanceLineKind = 'revenue' | 'fee' | 'promotion' | 'refund' | 'tax' | 'other';
 
 export interface ParsedFinanceLine {
-  amount: number;        // signed, exactly Amazon je aape che
+  amount: number;
   currency: string;
   feeType: string | null;
-  kind: FinanceLineKind; // P&L bucketing mate
+  kind: FinanceLineKind;
 }
 
-/** ChargeTypes je buyer-paid revenue che (Amazon cost nahi). */
-const REVENUE_CHARGE_TYPES = new Set([
-  'Principal',
-  'Shipping',
-  'ShippingCharge',
-  'GiftWrap',
-]);
+const REVENUE_CHARGE_TYPES = new Set(['Principal', 'Shipping', 'ShippingCharge', 'GiftWrap']);
 
-/** ChargeTypes je tax che (alag handle — usually marketplace-facilitated). */
 const TAX_CHARGE_TYPES = new Set([
   'Tax',
   'ShippingTax',
   'GiftWrapTax',
+  'TCS-SGST',
+  'TCS-CGST',
+  'TCS-IGST',
+  'TDS',
 ]);
 
 function parseMoney(obj: unknown): { amount: number; currency: string } | null {
   if (!obj || typeof obj !== 'object') return null;
   const record = obj as Record<string, unknown>;
 
-  // SP-API v0 CurrencyAmount vaapre che; ketlak serializers Amount vaapre.
   const rawAmount =
     record.CurrencyAmount !== undefined ? record.CurrencyAmount :
     record.Amount !== undefined ? record.Amount :
@@ -56,7 +54,6 @@ function parseMoney(obj: unknown): { amount: number; currency: string } | null {
   return { amount, currency };
 }
 
-/** Charge component → revenue / tax / refund (type ane sign mujab). */
 function parseChargeEntry(
   entry: Record<string, unknown>,
   isAdjustment: boolean
@@ -70,7 +67,6 @@ function parseChargeEntry(
   if (chargeType && TAX_CHARGE_TYPES.has(chargeType)) {
     kind = 'tax';
   } else if (chargeType && REVENUE_CHARGE_TYPES.has(chargeType)) {
-    // Adjustment list ma negative principal = buyer ne refund.
     kind = money.amount < 0 || isAdjustment ? 'refund' : 'revenue';
   } else {
     kind = money.amount < 0 ? 'refund' : 'revenue';
@@ -79,7 +75,6 @@ function parseChargeEntry(
   return { ...money, feeType: chargeType, kind };
 }
 
-/** Fee component → hammesha Amazon cost (negative). */
 function parseFeeEntry(entry: Record<string, unknown>): ParsedFinanceLine | null {
   const money = parseMoney(entry.FeeAmount) || parseMoney(entry);
   if (!money) return null;
@@ -87,7 +82,6 @@ function parseFeeEntry(entry: Record<string, unknown>): ParsedFinanceLine | null
   return { ...money, feeType, kind: 'fee' };
 }
 
-/** Promotion component → seller-funded discount (negative). */
 function parsePromotionEntry(entry: Record<string, unknown>): ParsedFinanceLine | null {
   const money = parseMoney(entry.PromotionAmount) || parseMoney(entry);
   if (!money) return null;
@@ -122,22 +116,15 @@ function pushPromotionList(lines: ParsedFinanceLine[], list: unknown) {
   }
 }
 
-function pushShipmentItems(
-  lines: ParsedFinanceLine[],
-  items: unknown,
-  isAdjustment: boolean
-) {
+function pushShipmentItems(lines: ParsedFinanceLine[], items: unknown, isAdjustment: boolean) {
   if (!Array.isArray(items)) return;
   for (const item of items) {
     if (!item || typeof item !== 'object') continue;
     const record = item as Record<string, unknown>;
-    // Charges (revenue / tax)
     pushChargeList(lines, record.ItemChargeList, isAdjustment);
     pushChargeList(lines, record.ItemChargeAdjustmentList, true);
-    // Fees (Amazon cost)
     pushFeeList(lines, record.ItemFeeList);
     pushFeeList(lines, record.ItemFeeAdjustmentList);
-    // Promotions (seller-funded)
     pushPromotionList(lines, record.PromotionList);
     pushPromotionList(lines, record.PromotionAdjustmentList);
   }
@@ -146,17 +133,14 @@ function pushShipmentItems(
 export function expandFinancialEvent(event: Record<string, unknown>): ParsedFinanceLine[] {
   const lines: ParsedFinanceLine[] = [];
 
-  // Order-level charges = revenue/tax
   pushChargeList(lines, event.OrderChargeList, false);
   pushChargeList(lines, event.OrderChargeAdjustmentList, true);
 
-  // Order/shipment-level fees = Amazon cost
   pushFeeList(lines, event.FeeList);
   pushFeeList(lines, event.OrderFeeList);
   pushFeeList(lines, event.ShipmentFeeList);
   pushFeeList(lines, event.ShipmentFeeAdjustmentList);
 
-  // Direct payments (e.g. COD / stored value) = revenue-side
   if (Array.isArray(event.DirectPaymentList)) {
     for (const dp of event.DirectPaymentList) {
       if (!dp || typeof dp !== 'object') continue;
@@ -172,11 +156,27 @@ export function expandFinancialEvent(event: Record<string, unknown>): ParsedFina
     }
   }
 
-  // Item-level breakdown
   pushShipmentItems(lines, event.ShipmentItemList, false);
   pushShipmentItems(lines, event.ShipmentItemAdjustmentList, true);
 
-  // Adjustment events (e.g. reimbursements)
+  const safet = parseMoney(event.ReimbursedAmount);
+  if (safet) {
+    lines.push({
+      ...safet,
+      feeType: 'SAFETReimbursement',
+      kind: safet.amount < 0 ? 'fee' : 'revenue',
+    });
+  }
+
+  const adsValue = parseMoney(event.transactionValue);
+  if (adsValue && event.transactionType) {
+    lines.push({
+      ...adsValue,
+      feeType: `Advertising-${String(event.transactionType)}`,
+      kind: adsValue.amount > 0 ? 'revenue' : 'fee',
+    });
+  }
+
   const adjustment = parseMoney(event.AdjustmentAmount);
   if (adjustment) {
     lines.push({
@@ -186,7 +186,6 @@ export function expandFinancialEvent(event: Record<string, unknown>): ParsedFina
     });
   }
 
-  // Flat service-fee event (e.g. ServiceFeeEvent, SellerDealPaymentEvent)
   if (lines.length === 0 && event.FeeType) {
     const money = parseMoney(event.FeeAmount);
     if (money) {
@@ -201,14 +200,12 @@ export function expandFinancialEvent(event: Record<string, unknown>): ParsedFina
   return lines;
 }
 
-/** Fallback classification — legacy rows je pase stored `kind` nathi. */
 function classifyByAmount(feeType: string | null | undefined, amount: number): FinanceLineKind {
   if (feeType && REVENUE_CHARGE_TYPES.has(feeType)) return amount < 0 ? 'refund' : 'revenue';
   if (feeType && TAX_CHARGE_TYPES.has(feeType)) return 'tax';
   return amount < 0 ? 'fee' : 'revenue';
 }
 
-/** Stored DB columns vaapro jyare hoy — raw_data re-parse karvanu tale. */
 export function getEffectiveFinanceLines(row: {
   amount?: number | string | null;
   currency?: string | null;

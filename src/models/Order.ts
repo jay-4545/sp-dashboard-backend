@@ -2,6 +2,14 @@ import { Model, DataTypes, Optional, Sequelize } from 'sequelize';
 
 export type FulfillmentChannel = 'FBA' | 'FBM';
 
+/**
+ * Order ma have return/refund nu summary store thay che jethi order list ma
+ * direct dekhay ke aa order return thayo ke nai, ane ketlu refund thayu.
+ * Aa fields finance sync vakhate financial events mathi update thay che.
+ *   - is_refunded   : aa order par koi refund event aavyu che?
+ *   - refund_amount : kul refund thayeli (buyer ne pacha aapeli) amount (positive).
+ *   - cogs_lost     : return thi gumaaveli product cost (restock na thay to).
+ */
 export interface OrderAttributes {
   id: string;
   account_id: string;
@@ -12,6 +20,9 @@ export interface OrderAttributes {
   currency: string | null;
   fulfillment_channel: FulfillmentChannel | null;
   purchase_date: Date | null;
+  is_refunded: boolean;
+  refund_amount: number;
+  cogs_lost: number;
   raw_data: Record<string, unknown> | null;
   created_at?: Date;
   updated_at?: Date;
@@ -19,7 +30,17 @@ export interface OrderAttributes {
 
 export type OrderCreationAttributes = Optional<
   OrderAttributes,
-  'id' | 'status' | 'marketplace_id' | 'order_total' | 'currency' | 'fulfillment_channel' | 'purchase_date' | 'raw_data'
+  | 'id'
+  | 'status'
+  | 'marketplace_id'
+  | 'order_total'
+  | 'currency'
+  | 'fulfillment_channel'
+  | 'purchase_date'
+  | 'is_refunded'
+  | 'refund_amount'
+  | 'cogs_lost'
+  | 'raw_data'
 >;
 
 export class Order extends Model<OrderAttributes, OrderCreationAttributes> implements OrderAttributes {
@@ -32,6 +53,9 @@ export class Order extends Model<OrderAttributes, OrderCreationAttributes> imple
   declare currency: string | null;
   declare fulfillment_channel: FulfillmentChannel | null;
   declare purchase_date: Date | null;
+  declare is_refunded: boolean;
+  declare refund_amount: number;
+  declare cogs_lost: number;
   declare raw_data: Record<string, unknown> | null;
   declare readonly created_at: Date;
   declare readonly updated_at: Date;
@@ -49,6 +73,9 @@ export function initOrderModel(sequelize: Sequelize): typeof Order {
       currency: { type: DataTypes.CHAR(3), allowNull: true },
       fulfillment_channel: { type: DataTypes.ENUM('FBA', 'FBM'), allowNull: true },
       purchase_date: { type: DataTypes.DATE, allowNull: true },
+      is_refunded: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+      refund_amount: { type: DataTypes.DECIMAL(12, 2), allowNull: false, defaultValue: 0 },
+      cogs_lost: { type: DataTypes.DECIMAL(12, 2), allowNull: false, defaultValue: 0 },
       raw_data: { type: DataTypes.JSONB, allowNull: true },
     },
     { sequelize, tableName: 'orders', underscored: true }

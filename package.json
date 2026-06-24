@@ -13,6 +13,7 @@
     "db:seed:undo": "sequelize-cli db:seed:undo:all",
     "encrypt-token": "tsx src/encrypt-token.ts",
     "clear-finance": "tsx src/clear-finance-data.ts",
+    "clear-orders": "tsx src/clear-order-data.ts",
     "reset-stuck-sync": "tsx src/reset-stuck-sync.ts"
   },
   "dependencies": {
